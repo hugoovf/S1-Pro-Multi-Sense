@@ -11,7 +11,6 @@ LD2450 = ns.class_("LD2450", cg.Component, uart.UARTDevice)
 CONF_DETECTION_RANGE = "detection_range"
 CONF_FLIP_Y = "flip_y"
 CONF_TRACKING_MODE = "tracking_mode"
-CONF_BLUETOOTH_STATE = "bluetooth_state"
 CONF_TARGET1_STATE = "target1_state"
 CONF_TARGET2_STATE = "target2_state"
 CONF_TARGET3_STATE = "target3_state"
@@ -37,7 +36,6 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_DETECTION_RANGE): cv.use_id(number.Number),
     cv.Required(CONF_FLIP_Y): cv.use_id(_switch.Switch),
     cv.Required(CONF_TRACKING_MODE): text_sensor.text_sensor_schema(),
-    cv.Optional(CONF_BLUETOOTH_STATE): text_sensor.text_sensor_schema(),
     cv.Optional(CONF_TARGET1_STATE): text_sensor.text_sensor_schema(),
     cv.Optional(CONF_TARGET2_STATE): text_sensor.text_sensor_schema(),
     cv.Optional(CONF_TARGET3_STATE): text_sensor.text_sensor_schema(),
@@ -68,10 +66,6 @@ async def to_code(config):
 
     tracking = await text_sensor.new_text_sensor(config[CONF_TRACKING_MODE])
     cg.add(var.set_tracking_mode_sensor(tracking))
-
-    if CONF_BLUETOOTH_STATE in config:
-        bt_state = await text_sensor.new_text_sensor(config[CONF_BLUETOOTH_STATE])
-        cg.add(var.set_bluetooth_state_sensor(bt_state))
 
     if CONF_TARGET1_STATE in config:
         t1state = await text_sensor.new_text_sensor(config[CONF_TARGET1_STATE])

@@ -5,6 +5,7 @@
 #include "esphome/components/number/number.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include <cmath>
 
 namespace esphome {
@@ -16,7 +17,7 @@ class LD2450 : public Component, public uart::UARTDevice {
   void set_detection_range(number::Number *range) { detection_range = range; }
   void set_flip_y(switch_::Switch *sw) { flip_y = sw; }
   void set_tracking_mode_sensor(text_sensor::TextSensor *ts) { tracking_mode_ = ts; }
-  void set_bluetooth_state_sensor(text_sensor::TextSensor *ts) { bluetooth_state_ = ts; }
+  void set_bluetooth_state_sensor(binary_sensor::BinarySensor *bs) { bluetooth_state_ = bs; }
   void set_target1_state_sensor(text_sensor::TextSensor *ts) { target1_state = ts; }
   void set_target2_state_sensor(text_sensor::TextSensor *ts) { target2_state = ts; }
   void set_target3_state_sensor(text_sensor::TextSensor *ts) { target3_state = ts; }
@@ -91,7 +92,7 @@ class LD2450 : public Component, public uart::UARTDevice {
   number::Number *detection_range{nullptr};
   switch_::Switch *flip_y{nullptr};
   text_sensor::TextSensor *tracking_mode_{nullptr};
-  text_sensor::TextSensor *bluetooth_state_{nullptr};
+  binary_sensor::BinarySensor *bluetooth_state_{nullptr};
   number::Number *exclusion_zone_points_count{nullptr};
   number::Number *exclusion_zone_points[8][2]{};
 
@@ -127,7 +128,7 @@ inline LD2450::LD2450()
   target3_distance = new sensor::Sensor();
 
   tracking_mode_   = new text_sensor::TextSensor();
-  bluetooth_state_ = new text_sensor::TextSensor();
+  bluetooth_state_ = new binary_sensor::BinarySensor();
   target1_state    = new text_sensor::TextSensor();
   target2_state    = new text_sensor::TextSensor();
   target3_state    = new text_sensor::TextSensor();
@@ -154,21 +155,21 @@ inline void LD2450::restore_factory_settings() {
 }
 
 inline void LD2450::turn_bluetooth_on() {
-  static const uint8_t CMD[] = {0x04, 0x00, 0xA4, 0x00, 0x01, 0x00, 0x04, 0x03, 0x02, 0x01};
+  static const uint8_t CMD[] = {0x04,0x00,0xA4,0x00,0x01,0x00,0x04,0x03,0x02,0x01};
   send_command(CMD, sizeof(CMD));
-  if (bluetooth_state_) bluetooth_state_->publish_state("On");
+  if (bluetooth_state_) bluetooth_state_->publish_state(true);
 }
 
 inline void LD2450::turn_bluetooth_off() {
-  static const uint8_t CMD[] = {0x04, 0x00, 0xA4, 0x00, 0x00, 0x00, 0x04, 0x03,0x02,0x01};
+  static const uint8_t CMD[] = {0x04,0x00,0xA4,0x00,0x00,0x00,0x04,0x03,0x02,0x01};
   send_command(CMD, sizeof(CMD));
-  if (bluetooth_state_) bluetooth_state_->publish_state("Off");
+  if (bluetooth_state_) bluetooth_state_->publish_state(false);
 }
 
 inline void LD2450::setup() {
   if (tracking_mode_) tracking_mode_->publish_state("Multi");
   set_multi_target_tracking();
-  if (bluetooth_state_) bluetooth_state_->publish_state("Off");
+  if (bluetooth_state_) bluetooth_state_->publish_state(false);
   turn_bluetooth_off();
   restart_module();
 }
