@@ -4,32 +4,33 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: "Sensy-One.S1 Pro Multi Sense"
-    version: "v1.1.12"  
+    version: "v1.1.12"
 
   on_boot:
-  - priority: 600
-    then:
-      - if:
-          condition:
-            lambda: 'return !id(onboarding_done);'
-          then:
-            - light.turn_on:
-                id: ws2812_LED
-                effect: "Purple Breathing"
-          else:
-            - lambda: '/* NaN */'
+    - priority: 600
+      then:
+        - if:
+            condition:
+              lambda: "return !id(onboarding_done);"
+            then:
+              - light.turn_on:
+                  id: ws2812_LED
+                  effect: "Purple Breathing"
+            else:
+              - lambda: "/* NaN */"
 
-  - priority: 800
-    then:
-      - lambda: |-
-          id(holding_enabled_bool) = id(holding_switch_internal).state;
-      - lambda: |-
-          if (!isnan(id(bme688_temp_offset).state)) {
-            id(bsec_virtual_sensor)->set_temperature_offset((float) id(bme688_temp_offset).state);
-          }
-          if (!isnan(id(scd40_temp_offset).state)) {
-            id(scd40_sensor)->set_temperature_offset((float) id(scd40_temp_offset).state);
-          }
+    - priority: 800
+      then:
+        - lambda: |-
+            id(enable_holding) = id(holding_switch_internal).state;
+            id(enable_ble_proxy) = id(ble_proxy_switch).state;
+        - lambda: |-
+            if (!isnan(id(bme688_temp_offset).state)) {
+              id(bsec_virtual_sensor)->set_temperature_offset((float) id(bme688_temp_offset).state);
+            }
+            if (!isnan(id(scd40_temp_offset).state)) {
+              id(scd40_sensor)->set_temperature_offset((float) id(scd40_temp_offset).state);
+            }
 
 script:
   - id: finish_onboarding
@@ -39,11 +40,11 @@ script:
           id: ws2812_LED
           red: 100%
           green: 0%
-          blue: 30% 
+          blue: 30%
           brightness: 100%
       - delay: 2s
       - light.turn_off: ws2812_LED
-      - lambda: 'id(onboarding_done) = true;'
+      - lambda: "id(onboarding_done) = true;"
 
 external_components:
   - source:
@@ -58,11 +59,25 @@ esp32:
       CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE: n
 
 wifi:
+  power_save_mode: none
+
   ap:
     ssid: "I am Sensy!"
     ap_timeout: 1min
 
-captive_portal: 
+  on_disconnect:
+    then:
+      - button.press: restart_btn
+
+captive_portal:
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+    continuous: false
+
+bluetooth_proxy:
+  active: false
 
 logger:
   level: NONE
@@ -74,11 +89,28 @@ api:
     then:
       - if:
           condition:
-            lambda: 'return !id(onboarding_done);'
+            lambda: "return !id(onboarding_done);"
           then:
             - script.execute: finish_onboarding
           else:
-            - lambda: '/* NaN */'
+            - lambda: "/* NaN */"
+      - if:
+          condition:
+            lambda: "return !!id(enable_ble_proxy);"
+          then:
+            - delay: 250ms
+            - esp32_ble_tracker.start_scan:
+                continuous: true
+
+  on_client_disconnected:
+    then:
+      - if:
+          condition:
+            lambda: "return !!id(enable_ble_proxy);"
+          then:
+            - esp32_ble_tracker.stop_scan:
+            - delay: 100ms
+            - button.press: restart_btn
 
 ota:
   - platform: web_server
@@ -91,7 +123,7 @@ uart:
   tx_pin: GPIO21
   rx_pin: GPIO20
   baud_rate: 256000
-  rx_buffer_size: 4096 
+  rx_buffer_size: 4096
 
 i2c:
   id: i2c_bus
@@ -114,23 +146,28 @@ bme68x_bsec2_i2c:
   sample_rate: LP
   supply_voltage: 3.3V
   state_save_interval: 6h
-  operating_age: 4d 
+  operating_age: 4d
 
 globals:
   - id: flip_y_state
     type: bool
     restore_value: true
-    initial_value: 'false'
+    initial_value: "false"
 
   - id: onboarding_done
     type: bool
     restore_value: true
-    initial_value: 'false'
+    initial_value: "false"
 
-  - id: holding_enabled_bool
+  - id: enable_holding
     type: bool
     restore_value: true
-    initial_value: 'true'
+    initial_value: "true"
+
+  - id: enable_ble_proxy
+    type: bool
+    restore_value: true
+    initial_value: "false"
 
 light:
   - platform: esp32_rmt_led_strip
@@ -171,7 +208,7 @@ button:
             id(flip_y_state) = !id(flip_y_state);
         - if:
             condition:
-              lambda: 'return id(flip_y_state);'
+              lambda: "return id(flip_y_state);"
             then:
               - switch.template.publish:
                   id: flip_y
@@ -244,7 +281,7 @@ button:
     on_press:
       - scd4x.perform_forced_calibration:
           id: scd40_sensor
-          value: 426           
+          value: 426
 
   - platform: template
     name: "SCD40 | Factory Reset"
@@ -255,32 +292,6 @@ button:
       - scd4x.factory_reset: scd40_sensor
       - delay: 250ms
       - button.press: restart_btn
-
-  - platform: template
-    name: "RADAR | Bluetooth On"
-    id: radar_bluetooth_on_btn
-    icon: mdi:bluetooth
-    entity_category: config
-    on_press:
-      then:
-        - lambda: |-
-            id(s1_sensor)->turn_bluetooth_on();
-        - delay: 250ms
-        - lambda: |-
-            id(s1_sensor)->restart_module();
-
-  - platform: template
-    name: "RADAR | Bluetooth Off"
-    id: radar_bluetooth_off_btn
-    icon: mdi:bluetooth-off
-    entity_category: config
-    on_press:
-      then:
-        - lambda: |-
-            id(s1_sensor)->turn_bluetooth_off();
-        - delay: 250ms
-        - lambda: |-
-            id(s1_sensor)->restart_module();
 
 switch:
   - platform: template
@@ -297,10 +308,10 @@ switch:
     turn_on_action:
       - output.ledc.set_frequency:
           id: mlt8530_buzzer
-          frequency: !lambda 'return (uint32_t) id(buzzer_pitch_hz).state;'
+          frequency: !lambda "return (uint32_t) id(buzzer_pitch_hz).state;"
       - output.set_level:
           id: mlt8530_buzzer
-          level: !lambda 'return id(buzzer_volume).state;'
+          level: !lambda "return id(buzzer_volume).state;"
     turn_off_action:
       - output.set_level:
           id: mlt8530_buzzer
@@ -312,16 +323,16 @@ switch:
     icon: mdi:account-clock
     entity_category: config
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF         
+    restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
       - lambda: |
-          id(holding_enabled_bool) = true;
+          id(enable_holding) = true;
       - switch.template.publish:
           id: holding_switch_internal
           state: true
     turn_off_action:
       - lambda: |
-          id(holding_enabled_bool) = false;
+          id(enable_holding) = false;
       - switch.template.publish:
           id: holding_switch_internal
           state: false
@@ -332,81 +343,120 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
 
+  - platform: template
+    id: radar_bluetooth_switch
+    name: "RADAR | Bluetooth"
+    icon: mdi:bluetooth
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: |-
+          id(s1_binary_sensor)->turn_bluetooth_on();
+      - delay: 250ms
+      - lambda: |-
+          id(s1_sensor)->restart_module();
+    turn_off_action:
+      - lambda: |-
+          id(s1_binary_sensor)->turn_bluetooth_off();
+      - delay: 250ms
+      - lambda: |-
+          id(s1_sensor)->restart_module();
+
+  - platform: template
+    id: ble_proxy_switch
+    name: "ESP32 | BLE Tracker"
+    icon: mdi:bluetooth-audio
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: |
+          id(enable_ble_proxy) = true;
+      - delay: 100ms
+      - esp32_ble_tracker.start_scan:
+          continuous: true
+    turn_off_action:
+      - esp32_ble_tracker.stop_scan:
+      - delay: 100ms
+      - lambda: |
+          id(enable_ble_proxy) = false;
+
 sensor:
   - platform: s1_pro
     id: s1_sensor
     target1_x:
-      name: "Target 1 X"
+      name: "RADAR | Target 1 X"
       id: target1_x
       icon: mdi:alpha-x-box-outline
       unit_of_measurement: "cm"
     target1_y:
-      name: "Target 1 Y"
+      name: "RADAR | Target 1 Y"
       id: target1_y
       icon: mdi:alpha-y-box-outline
       unit_of_measurement: "cm"
     target1_angle:
-      name: "Target 1 Angle"
+      name: "RADAR | Target 1 Angle"
       id: target1_angle
       icon: mdi:format-text-rotation-angle-up
       unit_of_measurement: "°"
     target1_speed:
-      name: "Target 1 Speed"
+      name: "RADAR | Target 1 Speed"
       id: target1_speed
       icon: mdi:speedometer
       unit_of_measurement: "cm/s"
     target1_distance:
-      name: "Target 1 Distance"
+      name: "RADAR | Target 1 Distance"
       id: target1_distance
       icon: mdi:map-marker-distance
       unit_of_measurement: "cm"
     target2_x:
-      name: "Target 2 X"
+      name: "RADAR | Target 2 X"
       id: target2_x
       icon: mdi:alpha-x-box-outline
       unit_of_measurement: "cm"
     target2_y:
-      name: "Target 2 Y"
+      name: "RADAR | Target 2 Y"
       id: target2_y
       icon: mdi:alpha-y-box-outline
       unit_of_measurement: "cm"
     target2_angle:
-      name: "Target 2 Angle"
+      name: "RADAR | Target 2 Angle"
       id: target2_angle
       icon: mdi:format-text-rotation-angle-up
       unit_of_measurement: "°"
     target2_speed:
-      name: "Target 2 Speed"
+      name: "RADAR | Target 2 Speed"
       id: target2_speed
       icon: mdi:speedometer
       unit_of_measurement: "cm/s"
     target2_distance:
-      name: "Target 2 Distance"
+      name: "RADAR | Target 2 Distance"
       id: target2_distance
       icon: mdi:map-marker-distance
       unit_of_measurement: "cm"
     target3_x:
-      name: "Target 3 X"
+      name: "RADAR | Target 3 X"
       id: target3_x
       icon: mdi:alpha-x-box-outline
       unit_of_measurement: "cm"
     target3_y:
-      name: "Target 3 Y"
+      name: "RADAR | Target 3 Y"
       id: target3_y
       icon: mdi:alpha-y-box-outline
       unit_of_measurement: "cm"
     target3_angle:
-      name: "Target 3 Angle"
+      name: "RADAR | Target 3 Angle"
       id: target3_angle
       icon: mdi:format-text-rotation-angle-up
       unit_of_measurement: "°"
     target3_speed:
-      name: "Target 3 Speed"
+      name: "RADAR | Target 3 Speed"
       id: target3_speed
       icon: mdi:speedometer
       unit_of_measurement: "cm/s"
     target3_distance:
-      name: "Target 3 Distance"
+      name: "RADAR | Target 3 Distance"
       id: target3_distance
       icon: mdi:map-marker-distance
       unit_of_measurement: "cm"
@@ -444,34 +494,28 @@ sensor:
       entity_category: diagnostic
       icon: mdi:radar
 
-    bluetooth_state:
-     name: "RADAR | Bluetooth"
-     id: radar_bluetooth_state
-     entity_category: diagnostic
-     icon: mdi:bluetooth
-
     target1_state:
-      name: "Target 1 State"
+      name: "RADAR | Target 1 State"
       id: radar_target1_state
       icon: mdi:account-check
 
     target2_state:
-      name: "Target 2 State"
+      name: "RADAR | Target 2 State"
       id: radar_target2_state
       icon: mdi:account-check
 
     target3_state:
-      name: "Target 3 State"
+      name: "RADAR | Target 3 State"
       id: radar_target3_state
       icon: mdi:account-check
 
-
   - platform: template
-    name: "All Targets Count"
+    name: "RADAR | All Targets Count"
     icon: mdi:counter
     id: all_targets_count
     unit_of_measurement: ""
     update_interval: 1s
+    accuracy_decimals: 0
     lambda: |-
       int count = 0;
       if (id(target1_distance).state > 0) count++;
@@ -480,11 +524,12 @@ sensor:
       return count;
 
   - platform: template
-    name: "Zone 1 Target Count"
+    name: "RADAR | Zone 1 Target Count"
     icon: mdi:counter
     id: zone1_target_count
     unit_of_measurement: ""
     update_interval: 1s
+    accuracy_decimals: 0
     lambda: |-
       const int MAX_PTS = 8;
       float xs[MAX_PTS], ys[MAX_PTS];
@@ -520,11 +565,12 @@ sensor:
       return count;
 
   - platform: template
-    name: "Zone 2 Target Count"
+    name: "RADAR | Zone 2 Target Count"
     icon: mdi:counter
     id: zone2_target_count
     unit_of_measurement: ""
     update_interval: 1s
+    accuracy_decimals: 0
     lambda: |-
       const int MAX_PTS = 8;
       float xs[MAX_PTS], ys[MAX_PTS];
@@ -560,11 +606,12 @@ sensor:
       return count;
 
   - platform: template
-    name: "Zone 3 Target Count"
+    name: "RADAR | Zone 3 Target Count"
     icon: mdi:counter
     id: zone3_target_count
     unit_of_measurement: ""
     update_interval: 1s
+    accuracy_decimals: 0
     lambda: |-
       const int MAX_PTS = 8;
       float xs[MAX_PTS], ys[MAX_PTS];
@@ -609,86 +656,84 @@ sensor:
     measurement_mode: periodic
     automatic_self_calibration: false
     ambient_pressure_compensation_source: bme_pressure
-    update_interval: 5s      
+    update_interval: 5s
     co2:
-      name: "SCD40 CO₂ Concentration"
+      name: "SCD40 | CO₂ Concentration"
       id: scd_co2
       icon: "mdi:molecule-co2"
       filters:
         - exponential_moving_average:
-             alpha: 0.03
-             send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 20
-        - debounce: 1s 
+            - throttle_average: 300s
+            - delta: 20
+        - debounce: 1s
       device_class: carbon_dioxide
       unit_of_measurement: "ppm"
-      accuracy_decimals: 0
-      state_class: measurement
     temperature:
-      name: "SCD40 Temperature"
+      name: "SCD40 | Temperature"
       id: scd40_temp
       unit_of_measurement: "°C"
       icon: "mdi:thermometer"
       filters:
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 0.1
-        - debounce: 1s 
+            - throttle_average: 300s
+            - delta: 0.1
+        - debounce: 1s
     humidity:
-      name: "SCD40 Humidity"
+      name: "SCD40 | Humidity"
       id: scd40_rh
       unit_of_measurement: "%"
       icon: "mdi:water-percent"
       filters:
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 0.5
+            - throttle_average: 300s
+            - delta: 0.5
         - debounce: 1s
 
   - platform: bme68x_bsec2
     temperature:
-      name: "BME688 Temperature"
+      name: "BME688 | Temperature"
       id: bme_temp
       filters:
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 0.1
+            - throttle_average: 300s
+            - delta: 0.1
         - debounce: 1s
     pressure:
-      name: "BME688 Pressure"
+      name: "BME688 | Pressure"
       id: bme_pressure
       filters:
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 600s
-           - delta: 10
+            - throttle_average: 600s
+            - delta: 10
         - debounce: 1s
     humidity:
-      name: "BME688 Humidity"
+      name: "BME688 | Humidity"
       id: bme_rh
       filters:
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 0.5
+            - throttle_average: 300s
+            - delta: 0.5
         - debounce: 1s
     gas_resistance:
-      name: "BME688 Gas Resistance (kΩ)"
+      name: "BME688 | Gas Resistance"
       id: bme_gas_resistance_kohm
       unit_of_measurement: "kΩ"
       accuracy_decimals: 1
@@ -697,25 +742,28 @@ sensor:
         - multiply: 0.001
         - throttle_average: 600s
     iaq:
-      name: "BME688 IAQ"
+      name: "BME688 | IAQ"
       id: bme_iaq
       filters:
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 5
-        - debounce: 1s  
+            - throttle_average: 300s
+            - delta: 5
+        - debounce: 1s
     co2_equivalent:
-      name: "BME688 CO₂ Equivalent"
+      name: "BME688 | CO₂ Equivalent"
       id: bme_co2_eq
       icon: "mdi:molecule-co2"
+      # No "device_class:", eCO₂ is calculated from VOC readings, not actual CO₂ concentration
+      # The carbon_dioxide device_class is only for direct CO₂ measurements
+      device_class: ""
       unit_of_measurement: "ppm"
       accuracy_decimals: 0
       state_class: measurement
     breath_voc_equivalent:
-      name: "BME688 VOC Equivalent"
+      name: "BME688 | VOC Equivalent"
       id: bme_voc_eq
 
   - platform: ltr390
@@ -723,7 +771,7 @@ sensor:
     update_interval: 5s
 
     light:
-      name: "LTR390 Ambient Light (lux)"
+      name: "LTR390 | Ambient Light"
       id: ltr390_lux_raw
       icon: mdi:brightness-5
       filters:
@@ -733,15 +781,15 @@ sensor:
             }
             return x + id(ltr390_lux_offset).state;
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 0.1
+            - throttle_average: 300s
+            - delta: 0.1
         - debounce: 1s
 
     uv_index:
-      name: "LTR390 UV Index"
+      name: "LTR390 | UV Index"
       id: ltr390_uv_raw
       icon: mdi:weather-sunset
       filters:
@@ -751,11 +799,11 @@ sensor:
             }
             return x + id(ltr390_uv_offset).state;
         - exponential_moving_average:
-           alpha: 0.03
-           send_every: 2
+            alpha: 0.03
+            send_every: 2
         - or:
-           - throttle_average: 300s
-           - delta: 0.01
+            - throttle_average: 300s
+            - delta: 0.01
         - debounce: 1s
 
     gain:
@@ -767,14 +815,14 @@ sensor:
     window_correction_factor: 2.3
 
   - platform: wifi_signal
-    name: "ESP32 RSSI"
+    name: "ESP32 | RSSI"
     internal: true
     id: wifi_rssi_raw
     update_interval: 5s
 
 number:
   - platform: template
-    name: "Any Presence Delay"
+    name: "RADAR | Any Presence Delay"
     icon: mdi:timer-outline
     id: presence_delay
     unit_of_measurement: "s"
@@ -787,7 +835,7 @@ number:
     mode: box
 
   - platform: template
-    name: "Any Movement Threshold"
+    name: "RADAR | Any Movement Threshold"
     icon: mdi:motion-sensor
     id: movement_threshold
     unit_of_measurement: "cm/s"
@@ -800,7 +848,7 @@ number:
     mode: box
 
   - platform: template
-    name: "Detection Range"
+    name: "RADAR | Detection Range"
     icon: mdi:signal-distance-variant
     id: detection_range
     unit_of_measurement: "cm"
@@ -814,7 +862,7 @@ number:
 
   - platform: template
     id: exclusion_zone_points_count
-    name: "Exclusion Zone Points Count"
+    name: "RADAR | Exclusion Zone Points Count"
     icon: mdi:counter
     unit_of_measurement: "pts"
     min_value: 0
@@ -827,7 +875,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p1_x
-    name: "Exclusion Zone P1 X"
+    name: "RADAR | Exclusion Zone P1 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -839,7 +887,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p1_y
-    name: "Exclusion Zone P1 Y"
+    name: "RADAR | Exclusion Zone P1 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -852,7 +900,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p2_x
-    name: "Exclusion Zone P2 X"
+    name: "RADAR | Exclusion Zone P2 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -864,7 +912,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p2_y
-    name: "Exclusion Zone P2 Y"
+    name: "RADAR | Exclusion Zone P2 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -877,7 +925,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p3_x
-    name: "Exclusion Zone P3 X"
+    name: "RADAR | Exclusion Zone P3 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -889,7 +937,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p3_y
-    name: "Exclusion Zone P3 Y"
+    name: "RADAR | Exclusion Zone P3 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -902,7 +950,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p4_x
-    name: "Exclusion Zone P4 X"
+    name: "RADAR | Exclusion Zone P4 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -914,7 +962,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p4_y
-    name: "Exclusion Zone P4 Y"
+    name: "RADAR | Exclusion Zone P4 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -927,7 +975,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p5_x
-    name: "Exclusion Zone P5 X"
+    name: "RADAR | Exclusion Zone P5 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -939,7 +987,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p5_y
-    name: "Exclusion Zone P5 Y"
+    name: "RADAR | Exclusion Zone P5 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -952,7 +1000,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p6_x
-    name: "Exclusion Zone P6 X"
+    name: "RADAR | Exclusion Zone P6 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -964,7 +1012,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p6_y
-    name: "Exclusion Zone P6 Y"
+    name: "RADAR | Exclusion Zone P6 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -977,7 +1025,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p7_x
-    name: "Exclusion Zone P7 X"
+    name: "RADAR | Exclusion Zone P7 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -989,7 +1037,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p7_y
-    name: "Exclusion Zone P7 Y"
+    name: "RADAR | Exclusion Zone P7 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1002,7 +1050,7 @@ number:
 
   - platform: template
     id: exclusion_zone_p8_x
-    name: "Exclusion Zone P8 X"
+    name: "RADAR | Exclusion Zone P8 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1014,7 +1062,7 @@ number:
     mode: box
   - platform: template
     id: exclusion_zone_p8_y
-    name: "Exclusion Zone P8 Y"
+    name: "RADAR | Exclusion Zone P8 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1027,7 +1075,7 @@ number:
 
   - platform: template
     id: zone1_points_count
-    name: "Zone 1 Points Count"
+    name: "RADAR | Zone 1 Points Count"
     icon: mdi:counter
     unit_of_measurement: "pts"
     min_value: 0
@@ -1040,7 +1088,7 @@ number:
 
   - platform: template
     id: zone1_p1_x
-    name: "Zone 1 P1 X"
+    name: "RADAR | Zone 1 P1 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1052,7 +1100,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p1_y
-    name: "Zone 1 P1 Y"
+    name: "RADAR | Zone 1 P1 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1065,7 +1113,7 @@ number:
 
   - platform: template
     id: zone1_p2_x
-    name: "Zone 1 P2 X"
+    name: "RADAR | Zone 1 P2 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1077,7 +1125,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p2_y
-    name: "Zone 1 P2 Y"
+    name: "RADAR | Zone 1 P2 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1090,7 +1138,7 @@ number:
 
   - platform: template
     id: zone1_p3_x
-    name: "Zone 1 P3 X"
+    name: "RADAR | Zone 1 P3 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1102,7 +1150,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p3_y
-    name: "Zone 1 P3 Y"
+    name: "RADAR | Zone 1 P3 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1115,7 +1163,7 @@ number:
 
   - platform: template
     id: zone1_p4_x
-    name: "Zone 1 P4 X"
+    name: "RADAR | Zone 1 P4 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1127,7 +1175,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p4_y
-    name: "Zone 1 P4 Y"
+    name: "RADAR | Zone 1 P4 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1140,7 +1188,7 @@ number:
 
   - platform: template
     id: zone1_p5_x
-    name: "Zone 1 P5 X"
+    name: "RADAR | Zone 1 P5 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1152,7 +1200,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p5_y
-    name: "Zone 1 P5 Y"
+    name: "RADAR | Zone 1 P5 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1165,7 +1213,7 @@ number:
 
   - platform: template
     id: zone1_p6_x
-    name: "Zone 1 P6 X"
+    name: "RADAR | Zone 1 P6 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1177,7 +1225,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p6_y
-    name: "Zone 1 P6 Y"
+    name: "RADAR | Zone 1 P6 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1190,7 +1238,7 @@ number:
 
   - platform: template
     id: zone1_p7_x
-    name: "Zone 1 P7 X"
+    name: "RADAR | Zone 1 P7 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1202,7 +1250,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p7_y
-    name: "Zone 1 P7 Y"
+    name: "RADAR | Zone 1 P7 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1215,7 +1263,7 @@ number:
 
   - platform: template
     id: zone1_p8_x
-    name: "Zone 1 P8 X"
+    name: "RADAR | Zone 1 P8 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1227,7 +1275,7 @@ number:
     mode: box
   - platform: template
     id: zone1_p8_y
-    name: "Zone 1 P8 Y"
+    name: "RADAR | Zone 1 P8 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1240,7 +1288,7 @@ number:
 
   - platform: template
     id: zone1_movement_threshold
-    name: "Zone 1 Movement Threshold"
+    name: "RADAR | Zone 1 Movement Threshold"
     icon: mdi:motion-sensor
     unit_of_measurement: "cm/s"
     min_value: 0
@@ -1253,7 +1301,7 @@ number:
 
   - platform: template
     id: zone1_presence_delay
-    name: "Zone 1 Presence Delay"
+    name: "RADAR | Zone 1 Presence Delay"
     icon: mdi:timer-outline
     unit_of_measurement: "s"
     min_value: 0
@@ -1266,7 +1314,7 @@ number:
 
   - platform: template
     id: zone2_points_count
-    name: "Zone 2 Points Count"
+    name: "RADAR | Zone 2 Points Count"
     icon: mdi:counter
     unit_of_measurement: "pts"
     min_value: 0
@@ -1279,7 +1327,7 @@ number:
 
   - platform: template
     id: zone2_p1_x
-    name: "Zone 2 P1 X"
+    name: "RADAR | Zone 2 P1 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1291,7 +1339,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p1_y
-    name: "Zone 2 P1 Y"
+    name: "RADAR | Zone 2 P1 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1304,7 +1352,7 @@ number:
 
   - platform: template
     id: zone2_p2_x
-    name: "Zone 2 P2 X"
+    name: "RADAR | Zone 2 P2 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1316,7 +1364,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p2_y
-    name: "Zone 2 P2 Y"
+    name: "RADAR | Zone 2 P2 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1329,7 +1377,7 @@ number:
 
   - platform: template
     id: zone2_p3_x
-    name: "Zone 2 P3 X"
+    name: "RADAR | Zone 2 P3 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1341,7 +1389,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p3_y
-    name: "Zone 2 P3 Y"
+    name: "RADAR | Zone 2 P3 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1354,7 +1402,7 @@ number:
 
   - platform: template
     id: zone2_p4_x
-    name: "Zone 2 P4 X"
+    name: "RADAR | Zone 2 P4 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1366,7 +1414,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p4_y
-    name: "Zone 2 P4 Y"
+    name: "RADAR | Zone 2 P4 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1379,7 +1427,7 @@ number:
 
   - platform: template
     id: zone2_p5_x
-    name: "Zone 2 P5 X"
+    name: "RADAR | Zone 2 P5 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1391,7 +1439,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p5_y
-    name: "Zone 2 P5 Y"
+    name: "RADAR | Zone 2 P5 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1404,7 +1452,7 @@ number:
 
   - platform: template
     id: zone2_p6_x
-    name: "Zone 2 P6 X"
+    name: "RADAR | Zone 2 P6 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1416,7 +1464,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p6_y
-    name: "Zone 2 P6 Y"
+    name: "RADAR | Zone 2 P6 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1429,7 +1477,7 @@ number:
 
   - platform: template
     id: zone2_p7_x
-    name: "Zone 2 P7 X"
+    name: "RADAR | Zone 2 P7 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1441,7 +1489,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p7_y
-    name: "Zone 2 P7 Y"
+    name: "RADAR | Zone 2 P7 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1454,7 +1502,7 @@ number:
 
   - platform: template
     id: zone2_p8_x
-    name: "Zone 2 P8 X"
+    name: "RADAR | Zone 2 P8 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1466,7 +1514,7 @@ number:
     mode: box
   - platform: template
     id: zone2_p8_y
-    name: "Zone 2 P8 Y"
+    name: "RADAR | Zone 2 P8 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1479,7 +1527,7 @@ number:
 
   - platform: template
     id: zone2_movement_threshold
-    name: "Zone 2 Movement Threshold"
+    name: "RADAR | Zone 2 Movement Threshold"
     icon: mdi:motion-sensor
     unit_of_measurement: "cm/s"
     min_value: 0
@@ -1492,7 +1540,7 @@ number:
 
   - platform: template
     id: zone2_presence_delay
-    name: "Zone 2 Presence Delay"
+    name: "RADAR | Zone 2 Presence Delay"
     icon: mdi:timer-outline
     unit_of_measurement: "s"
     min_value: 0
@@ -1505,7 +1553,7 @@ number:
 
   - platform: template
     id: zone3_points_count
-    name: "Zone 3 Points Count"
+    name: "RADAR | Zone 3 Points Count"
     icon: mdi:counter
     unit_of_measurement: "pts"
     min_value: 0
@@ -1518,7 +1566,7 @@ number:
 
   - platform: template
     id: zone3_p1_x
-    name: "Zone 3 P1 X"
+    name: "RADAR | Zone 3 P1 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1530,7 +1578,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p1_y
-    name: "Zone 3 P1 Y"
+    name: "RADAR | Zone 3 P1 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1543,7 +1591,7 @@ number:
 
   - platform: template
     id: zone3_p2_x
-    name: "Zone 3 P2 X"
+    name: "RADAR | Zone 3 P2 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1555,7 +1603,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p2_y
-    name: "Zone 3 P2 Y"
+    name: "RADAR | Zone 3 P2 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1568,7 +1616,7 @@ number:
 
   - platform: template
     id: zone3_p3_x
-    name: "Zone 3 P3 X"
+    name: "RADAR | Zone 3 P3 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1580,7 +1628,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p3_y
-    name: "Zone 3 P3 Y"
+    name: "RADAR | Zone 3 P3 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1593,7 +1641,7 @@ number:
 
   - platform: template
     id: zone3_p4_x
-    name: "Zone 3 P4 X"
+    name: "RADAR | Zone 3 P4 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1605,7 +1653,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p4_y
-    name: "Zone 3 P4 Y"
+    name: "RADAR | Zone 3 P4 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1618,7 +1666,7 @@ number:
 
   - platform: template
     id: zone3_p5_x
-    name: "Zone 3 P5 X"
+    name: "RADAR | Zone 3 P5 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1630,7 +1678,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p5_y
-    name: "Zone 3 P5 Y"
+    name: "RADAR | Zone 3 P5 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1643,7 +1691,7 @@ number:
 
   - platform: template
     id: zone3_p6_x
-    name: "Zone 3 P6 X"
+    name: "RADAR | Zone 3 P6 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1655,7 +1703,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p6_y
-    name: "Zone 3 P6 Y"
+    name: "RADAR | Zone 3 P6 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1668,7 +1716,7 @@ number:
 
   - platform: template
     id: zone3_p7_x
-    name: "Zone 3 P7 X"
+    name: "RADAR | Zone 3 P7 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1680,7 +1728,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p7_y
-    name: "Zone 3 P7 Y"
+    name: "RADAR | Zone 3 P7 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1693,7 +1741,7 @@ number:
 
   - platform: template
     id: zone3_p8_x
-    name: "Zone 3 P8 X"
+    name: "RADAR | Zone 3 P8 X"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: -600
@@ -1705,7 +1753,7 @@ number:
     mode: box
   - platform: template
     id: zone3_p8_y
-    name: "Zone 3 P8 Y"
+    name: "RADAR | Zone 3 P8 Y"
     icon: mdi:map-marker
     unit_of_measurement: "cm"
     min_value: 0
@@ -1718,7 +1766,7 @@ number:
 
   - platform: template
     id: zone3_movement_threshold
-    name: "Zone 3 Movement Threshold"
+    name: "RADAR | Zone 3 Movement Threshold"
     icon: mdi:motion-sensor
     unit_of_measurement: "cm/s"
     min_value: 0
@@ -1731,7 +1779,7 @@ number:
 
   - platform: template
     id: zone3_presence_delay
-    name: "Zone 3 Presence Delay"
+    name: "RADAR | Zone 3 Presence Delay"
     icon: mdi:timer-outline
     unit_of_measurement: "s"
     min_value: 0
@@ -1744,7 +1792,7 @@ number:
 
   - platform: template
     id: ltr390_lux_offset
-    name: "LTR390 Lux Offset"
+    name: "LTR390 | Lux Offset"
     icon: mdi:brightness-5
     unit_of_measurement: "lux"
     min_value: -10000
@@ -1757,7 +1805,7 @@ number:
 
   - platform: template
     id: ltr390_uv_offset
-    name: "LTR390 UV Offset"
+    name: "LTR390 | UV Offset"
     icon: mdi:weather-sunset
     unit_of_measurement: "index"
     min_value: -50
@@ -1770,7 +1818,7 @@ number:
 
   - platform: template
     id: buzzer_pitch_hz
-    name: "MLT8530 Buzzer Pitch"
+    name: "MLT8530 | Buzzer Pitch"
     icon: mdi:knob
     unit_of_measurement: "Hz"
     min_value: 100
@@ -1787,11 +1835,11 @@ number:
           then:
             - output.ledc.set_frequency:
                 id: mlt8530_buzzer
-                frequency: !lambda 'return (uint32_t) x;'
+                frequency: !lambda "return (uint32_t) x;"
 
   - platform: template
     id: buzzer_volume
-    name: "MLT8530 Buzzer Volume"
+    name: "MLT8530 | Buzzer Volume"
     icon: mdi:volume-high
     min_value: 0.0
     max_value: 1.0
@@ -1807,11 +1855,11 @@ number:
           then:
             - output.set_level:
                 id: mlt8530_buzzer
-                level: !lambda 'return x;'
+                level: !lambda "return x;"
 
   - platform: template
     id: scd40_temp_offset
-    name: "SCD40 Temp Offset"
+    name: "SCD40 | Temp Offset"
     icon: mdi:thermometer-plus
     unit_of_measurement: "°C"
     min_value: -50
@@ -1829,7 +1877,7 @@ number:
 
   - platform: template
     id: bme688_temp_offset
-    name: "BME688 Temp Offset"
+    name: "BME688 | Temp Offset"
     icon: mdi:thermometer-plus
     unit_of_measurement: "°C"
     min_value: -50
@@ -1847,7 +1895,7 @@ number:
 
   - platform: template
     id: gate_radius_cm
-    name: "RADAR Gate Radius"
+    name: "RADAR | Gate Radius"
     icon: mdi:crosshairs-gps
     unit_of_measurement: "cm"
     min_value: 5
@@ -1860,7 +1908,7 @@ number:
 
   - platform: template
     id: stationary_speed_thresh
-    name: "RADAR Stationary Speed Threshold"
+    name: "RADAR | Stationary Speed Threshold"
     icon: mdi:speedometer-slow
     unit_of_measurement: "cm/s"
     min_value: 0
@@ -1873,7 +1921,7 @@ number:
 
   - platform: template
     id: stationary_time_s
-    name: "RADAR Stationary Time"
+    name: "RADAR | Stationary Time"
     icon: mdi:timer-sand
     unit_of_measurement: "s"
     min_value: 0
@@ -1886,7 +1934,7 @@ number:
 
   - platform: template
     id: dropout_hold_m
-    name: "RADAR Dropout Hold Time"
+    name: "RADAR | Dropout Hold Time"
     icon: mdi:timer-lock-outline
     unit_of_measurement: "min"
     min_value: 0
@@ -1902,8 +1950,96 @@ binary_sensor:
     name: "ESP32 | Status"
     entity_category: diagnostic
 
+  - platform: s1_pro
+    id: s1_binary_sensor
+
+    bluetooth_state:
+      name: "RADAR | Bluetooth"
+      id: radar_bluetooth_state
+      entity_category: diagnostic
+      device_class: power
+      icon: mdi:bluetooth
+
   - platform: template
-    name: "Any Presence"
+    name: "ESP32 | BLE Tracker"
+    device_class: running
+    entity_category: diagnostic
+    icon: mdi:bluetooth-settings
+    lambda: |-
+      return !!id(enable_ble_proxy);
+
+  - platform: template
+    name: "BME688 | Air Cold"
+    icon: mdi:snowflake-alert
+    device_class: cold
+    lambda: |-
+      return id(bme_temp).state < 15.0;
+
+  - platform: template
+    name: "BME688 | Air Hot"
+    icon: mdi:thermometer-alert
+    device_class: heat
+    lambda: |-
+      return id(bme_temp).state > 30.0;
+
+  - platform: template
+    name: "SCD40 | Air Cold"
+    icon: mdi:snowflake-alert
+    device_class: cold
+    lambda: |-
+      return id(scd40_temp).state < 15.0;
+
+  - platform: template
+    name: "SCD40 | Air Hot"
+    icon: mdi:thermometer-alert
+    device_class: heat
+    lambda: |-
+      return id(scd40_temp).state > 30.0;
+
+  - platform: template
+    name: "BME688 | Gas"
+    icon: mdi:gas-cylinder
+    device_class: gas
+    lambda: |-
+      return id(bme_iaq).state >= 300.0 || id(bme_voc_eq).state >= 15.0;
+
+  - platform: template
+    name: "BME688 | Air Moisture"
+    icon: mdi:water-alert
+    device_class: moisture
+    lambda: |-
+      return id(bme_rh).state > 70.0;
+
+  - platform: template
+    name: "SCD40 | Air Moisture"
+    icon: mdi:water-alert
+    device_class: moisture
+    lambda: |-
+      return id(scd40_rh).state > 70.0;
+
+  - platform: template
+    name: "BME688 | Air Safety"
+    icon: mdi:shield-alert
+    device_class: safety
+    lambda: |-
+      return id(bme_iaq).state >= 250.0 || id(bme_voc_eq).state >= 10.0;
+
+  - platform: template
+    name: "SCD40 | Air Safety"
+    icon: mdi:shield-alert
+    device_class: safety
+    lambda: |-
+      return id(scd_co2).state >= 1800.0;
+
+  - platform: template
+    name: "BME688 | Smoke"
+    icon: mdi:smoke-detector
+    device_class: smoke
+    lambda: |-
+      return id(bme_iaq).state >= 350.0 || id(bme_voc_eq).state >= 20.0;
+
+  - platform: template
+    name: "RADAR | Any Presence"
     icon: mdi:home-account
     device_class: presence
     lambda: |-
@@ -1919,7 +2055,7 @@ binary_sensor:
       return (now - last_off) < (unsigned long)(id(presence_delay).state * 1000.0);
 
   - platform: template
-    name: "Any Movement"
+    name: "RADAR | Any Movement"
     icon: mdi:motion-sensor
     device_class: motion
     lambda: |-
@@ -1929,7 +2065,7 @@ binary_sensor:
              (std::abs(id(target3_speed).state) > thresh);
 
   - platform: template
-    name: "Zone 1 Presence"
+    name: "RADAR | Zone 1 Presence"
     icon: mdi:home-account
     device_class: presence
     lambda: |-
@@ -1971,7 +2107,7 @@ binary_sensor:
       return (now - last_off_1) < (unsigned long)(id(zone1_presence_delay).state * 1000.0);
 
   - platform: template
-    name: "Zone 1 Movement"
+    name: "RADAR | Zone 1 Movement"
     icon: mdi:motion-sensor
     device_class: motion
     lambda: |-
@@ -2010,7 +2146,7 @@ binary_sensor:
       return mov;
 
   - platform: template
-    name: "Zone 2 Presence"
+    name: "RADAR | Zone 2 Presence"
     icon: mdi:home-account
     device_class: presence
     lambda: |-
@@ -2052,7 +2188,7 @@ binary_sensor:
       return (now - last_off_2) < (unsigned long)(id(zone2_presence_delay).state * 1000.0);
 
   - platform: template
-    name: "Zone 2 Movement"
+    name: "RADAR | Zone 2 Movement"
     icon: mdi:motion-sensor
     device_class: motion
     lambda: |-
@@ -2091,7 +2227,7 @@ binary_sensor:
       return mov;
 
   - platform: template
-    name: "Zone 3 Presence"
+    name: "RADAR | Zone 3 Presence"
     icon: mdi:home-account
     device_class: presence
     lambda: |-
@@ -2133,7 +2269,7 @@ binary_sensor:
       return (now - last_off_3) < (unsigned long)(id(zone3_presence_delay).state * 1000.0);
 
   - platform: template
-    name: "Zone 3 Movement"
+    name: "RADAR | Zone 3 Movement"
     icon: mdi:motion-sensor
     device_class: motion
     lambda: |-
@@ -2172,14 +2308,11 @@ binary_sensor:
       return mov;
 
 text_sensor:
-
   - platform: wifi_info
     ip_address:
       name: "ESP32 | IP"
       entity_category: diagnostic
       icon: mdi:ip-network
-
-  - platform: wifi_info
     ssid:
       name: "ESP32 | SSID"
       entity_category: diagnostic
@@ -2196,14 +2329,14 @@ text_sensor:
       else if (rssi < -80) return {"Weak"};
       else if (rssi < -70) return {"Moderate"};
       else if (rssi < -60) return {"Strong"};
-      else                  return {"Very Strong"};
+      else                 return {"Very Strong"};
 
   - platform: bme68x_bsec2
     iaq_accuracy:
-      name: "BME688 IAQ Accuracy"
+      name: "BME688 | IAQ Accuracy"
 
   - platform: template
-    name: "BME688 IAQ Classification"
+    name: "BME688 | IAQ Classification"
     icon: mdi:air-filter
     lambda: |-
       if ( int(id(bme_iaq).state) <= 50) {
