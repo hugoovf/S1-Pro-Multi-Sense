@@ -696,7 +696,7 @@ sensor:
     co2:
       name: "SCD40 | CO₂ Concentration"
       id: scd_co2
-      icon: "mdi:molecule-co2"
+      icon: mdi:molecule-co2
       filters:
         - exponential_moving_average:
             alpha: 0.03
@@ -791,7 +791,7 @@ sensor:
     co2_equivalent:
       name: "BME688 | CO₂ Equivalent"
       id: bme_co2_eq
-      icon: "mdi:molecule-co2"
+      icon: mdi:molecule-co2
       # No "device_class:", eCO₂ is calculated from VOC readings, not actual CO₂ concentration
       # The carbon_dioxide device_class is only for direct CO₂ measurements
       device_class: ""
@@ -2009,6 +2009,48 @@ binary_sensor:
       return id(bme_temp).state > 30.0;
 
   - platform: template
+    name: "BME688 | Air Moisture"
+    icon: mdi:water-alert
+    device_class: safety
+    lambda: |-
+      return id(bme_rh).state > 70.0;
+
+  - platform: template
+    name: "BME688 | Air Dry"
+    icon: mdi:water-off-outline
+    device_class: safety
+    lambda: |-
+      return id(bme_rh).state < 25.0;
+
+  - platform: template
+    name: "BME688 | High IAQ"
+    icon: mdi:wind-turbine-alert
+    device_class: safety
+    lambda: |-
+      return id(bme_iaq).state >= 200.0;
+
+  - platform: template
+    name: "BME688 | High VOC"
+    icon: mdi:gas-burner
+    device_class: safety
+    lambda: |-
+      return id(bme_voc_eq).state >= 10.0;
+
+  - platform: template
+    name: "BME688 | Gas"
+    icon: mdi:gas-cylinder
+    device_class: gas
+    lambda: |-
+      return id(bme_iaq).state >= 300.0 || id(bme_voc_eq).state >= 15.0;
+
+  - platform: template
+    name: "BME688 | Smoke"
+    icon: mdi:smoke-detector-alert
+    device_class: smoke
+    lambda: |-
+      return id(bme_iaq).state >= 350.0 || id(bme_voc_eq).state >= 20.0;
+
+  - platform: template
     name: "SCD40 | Air Cold"
     icon: mdi:snowflake-alert
     device_class: cold
@@ -2023,20 +2065,6 @@ binary_sensor:
       return id(scd40_temp).state > 30.0;
 
   - platform: template
-    name: "BME688 | Gas"
-    icon: mdi:gas-cylinder
-    device_class: gas
-    lambda: |-
-      return id(bme_iaq).state >= 300.0 || id(bme_voc_eq).state >= 15.0;
-
-  - platform: template
-    name: "BME688 | Air Moisture"
-    icon: mdi:water-alert
-    device_class: moisture
-    lambda: |-
-      return id(bme_rh).state > 70.0;
-
-  - platform: template
     name: "SCD40 | Air Moisture"
     icon: mdi:water-alert
     device_class: moisture
@@ -2044,25 +2072,11 @@ binary_sensor:
       return id(scd40_rh).state > 70.0;
 
   - platform: template
-    name: "BME688 | Air Safety"
-    icon: mdi:shield-alert
+    name: "SCD40 | Oxygen"
+    icon: mdi:sprout
     device_class: safety
     lambda: |-
-      return id(bme_iaq).state >= 250.0 || id(bme_voc_eq).state >= 10.0;
-
-  - platform: template
-    name: "SCD40 | Air Safety"
-    icon: mdi:shield-alert
-    device_class: safety
-    lambda: |-
-      return id(scd_co2).state >= 1800.0;
-
-  - platform: template
-    name: "BME688 | Smoke"
-    icon: mdi:smoke-detector
-    device_class: smoke
-    lambda: |-
-      return id(bme_iaq).state >= 350.0 || id(bme_voc_eq).state >= 20.0;
+      return id(scd_co2).state >= 1500.0;
 
   - platform: template
     name: "RADAR | Any Presence"

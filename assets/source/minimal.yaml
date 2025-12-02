@@ -4,7 +4,7 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: "Sensy-One.S1 Pro Multi Sense"
-    version: "v1.1.12"
+    version: "v1.1.13"
 
   on_boot:
     - priority: 800
@@ -596,7 +596,7 @@ sensor:
       name: "SCD40 | CO₂ Concentration"
       id: scd_co2
       unit_of_measurement: "ppm"
-      icon: "mdi:molecule-co2"
+      icon: mdi:molecule-co2
       filters:
         - exponential_moving_average:
             alpha: 0.03
@@ -1488,14 +1488,6 @@ binary_sensor:
     entity_category: diagnostic
 
   - platform: template
-    name: "ESP32 | BLE Tracker"
-    device_class: running
-    entity_category: diagnostic
-    icon: mdi:bluetooth-settings
-    lambda: |-
-      return !!id(enable_ble_proxy);
-
-  - platform: template
     name: "BME688 | Air Cold"
     icon: mdi:snowflake-alert
     device_class: cold
@@ -1524,15 +1516,18 @@ binary_sensor:
       return id(bme_rh).state < 25.0;
 
   - platform: template
-    name: "BME688 | Environment"
-    icon: mdi:home-climate-outline
+    name: "BME688 | High IAQ"
+    icon: mdi:wind-turbine-alert
     device_class: safety
     lambda: |-
-      float temp = id(bme_temp).state;
-      float hum = id(bme_rh).state;
-      bool climate_unsafe = (temp > 28.0 && hum > 70.0) || (temp < 16.0 && hum > 80.0);
-      bool air_quality_unsafe = id(bme_iaq).state >= 250.0 || id(bme_voc_eq).state >= 10.0;
-      return climate_unsafe || air_quality_unsafe;
+      return id(bme_iaq).state >= 200.0;
+
+  - platform: template
+    name: "BME688 | High VOC"
+    icon: mdi:gas-burner
+    device_class: safety
+    lambda: |-
+      return id(bme_voc_eq).state >= 10.0;
 
   - platform: template
     name: "BME688 | Gas"
@@ -1543,14 +1538,14 @@ binary_sensor:
 
   - platform: template
     name: "BME688 | Smoke"
-    icon: mdi:smoke-detector
+    icon: mdi:smoke-detector-alert
     device_class: smoke
     lambda: |-
       return id(bme_iaq).state >= 350.0 || id(bme_voc_eq).state >= 20.0;
 
   - platform: template
     name: "SCD40 | Oxygen"
-    icon: mdi:molecule-co2
+    icon: mdi:sprout
     device_class: safety
     lambda: |-
       return id(scd_co2).state >= 1500.0;
